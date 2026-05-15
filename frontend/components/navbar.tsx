@@ -19,6 +19,24 @@ export function Navbar() {
         </Link>
 
         <div className="navbar-actions">
+          {authState.status === "loading" ? (
+            <span className="navbar-loading">...</span>
+          ) : isSignedIn ? (
+            <>
+              <Link href="/list" className="auth-btn create-listing-btn">
+                Create Listing
+              </Link>
+              <form action="/auth/sign-out" method="post">
+                <button type="submit" className="auth-btn sign-out-btn">
+                  Sign out
+                </button>
+              </form>
+            </>
+          ) : (
+            <Link href="/login" className="auth-btn sign-in-btn">
+              Sign in
+            </Link>
+          )}
           <button
             type="button"
             onClick={toggleTheme}
@@ -28,19 +46,6 @@ export function Navbar() {
             {theme === "light" ? <MoonIcon /> : <SunIcon />}
           </button>
 
-          {authState.status === "loading" ? (
-            <span className="navbar-loading">...</span>
-          ) : isSignedIn ? (
-            <form action="/auth/sign-out" method="post">
-              <button type="submit" className="auth-btn sign-out-btn">
-                Sign out
-              </button>
-            </form>
-          ) : (
-            <Link href="/login" className="auth-btn sign-in-btn">
-              Sign in
-            </Link>
-          )}
         </div>
       </div>
     </nav>
