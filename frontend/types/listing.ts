@@ -81,3 +81,32 @@ export const MAX_IMAGES = 10;
 export const MAX_IMAGE_SIZE_MB = 5;
 export const MAX_IMAGE_SIZE_BYTES = MAX_IMAGE_SIZE_MB * 1024 * 1024;
 export const ALLOWED_IMAGE_TYPES = ["image/jpeg", "image/png", "image/webp"];
+
+export const STATUS_LABELS: Record<string, string> = {
+  active: "Active",
+  inactive: "Inactive",
+  rented: "Rented",
+};
+
+export interface ListingDetail {
+  id: string;
+  owner_id: string;
+  description: string;
+  sublet_type: SubletType;
+  bedrooms: number;
+  bathrooms: number;
+  sqft: number | null;
+  monthly_rent_cents: number;
+  utilities_included: boolean;
+  additional_fees_cents: number;
+  furnished: boolean;
+  location: string;
+  address: string;
+  start_date: string;
+  end_date: string;
+  status: string;
+  created_at: string;
+  updated_at: string;
+  amenities: Amenity[];
+  images: string[];
+}

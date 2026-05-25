@@ -23,6 +23,9 @@ export function Navbar() {
             <span className="navbar-loading">...</span>
           ) : isSignedIn ? (
             <>
+              <Link href="/my-listings" className="auth-btn my-listings-btn">
+                My Listings
+              </Link>
               <Link href="/list" className="auth-btn create-listing-btn">
                 Create Listing
               </Link>

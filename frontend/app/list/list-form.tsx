@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useRef } from "react";
+import { useMemo, useRef, useState } from "react";
 import { createBrowserSupabaseClient } from "@/lib/supabase/client";
 import {
   SUBLET_TYPES,
@@ -48,6 +48,21 @@ export function ListForm({ userId }: ListFormProps) {
   const [images, setImages] = useState<ImagePreview[]>([]);
 
   const fileInputRef = useRef<HTMLInputElement>(null);
+
+  // Synchronous re-entrancy guard. `pending` is React state — two clicks in the
+  // same tick can both read `pending === false` before either re-render runs.
+  // A ref flips immediately, so the second click is dropped on the floor.
+  const submittingRef = useRef(false);
+
+  // Stable per-form-mount idempotency key. Sent on every submission attempt so
+  // the backend can dedupe retried POSTs (e.g. network blips, frantic clicks).
+  const idempotencyKey = useMemo(
+    () =>
+      typeof crypto !== "undefined" && "randomUUID" in crypto
+        ? crypto.randomUUID()
+        : `${Date.now()}-${Math.random().toString(36).slice(2)}`,
+    [],
+  );
 
   function toggleAmenity(amenity: Amenity) {
     setAmenities((prev) =>
@@ -166,11 +181,18 @@ export function ListForm({ userId }: ListFormProps) {
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
+
+    // Synchronous guard — wins the race against React state updates so a
+    // double click in the same tick can never start two submissions.
+    if (submittingRef.current) return;
+    submittingRef.current = true;
+
     setError(null);
 
     const validationError = validateForm();
     if (validationError) {
       setError(validationError);
+      submittingRef.current = false;
       return;
     }
 
@@ -199,13 +221,23 @@ export function ListForm({ userId }: ListFormProps) {
         image_paths: uploadedPaths,
       };
 
+      const supabase = createBrowserSupabaseClient();
+      const {
+        data: { session },
+      } = await supabase.auth.getSession();
+      const accessToken = session?.access_token;
+      if (!accessToken) {
+        throw new Error("Your session has expired. Please sign in again.");
+      }
+
       const response = await fetch(
         `${process.env.NEXT_PUBLIC_API_URL}/listings`,
         {
           method: "POST",
           headers: {
             "Content-Type": "application/json",
-            Authorization: `Bearer ${(await createBrowserSupabaseClient().auth.getSession()).data.session?.access_token}`,
+            Authorization: `Bearer ${accessToken}`,
+            "Idempotency-Key": idempotencyKey,
           },
           body: JSON.stringify(payload),
         }
@@ -224,6 +256,10 @@ export function ListForm({ userId }: ListFormProps) {
     } catch (err) {
       await deleteUploadedImages(uploadedPaths);
       setError(err instanceof Error ? err.message : "Failed to create listing");
+      // Allow the user to fix and retry. The same idempotency key is reused
+      // so the backend will return the original row if a previous attempt
+      // actually reached the DB before the network error.
+      submittingRef.current = false;
     } finally {
       setPending(false);
       setUploadProgress(null);
@@ -231,7 +267,7 @@ export function ListForm({ userId }: ListFormProps) {
   }
 
   return (
-    <form onSubmit={handleSubmit} className="list-form">
+    <form onSubmit={handleSubmit} className="list-form" aria-busy={pending}>
       {error && (
         <p role="alert" className="list-error">
           {error}
@@ -537,7 +573,12 @@ export function ListForm({ userId }: ListFormProps) {
       </section>
 
       <div className="form-actions">
-        <button type="submit" disabled={pending} className="submit-btn">
+        <button
+          type="submit"
+          disabled={pending}
+          aria-disabled={pending}
+          className="submit-btn"
+        >
           {pending ? uploadProgress || "Creating..." : "Create Listing"}
         </button>
       </div>
