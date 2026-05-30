@@ -3,10 +3,12 @@
 import Link from "next/link";
 import { useSupabaseAuth } from "@/hooks/use-supabase-auth";
 import { useTheme } from "@/hooks/use-theme";
+import { useUnreadCount } from "@/hooks/use-unread-count";
 
 export function Navbar() {
   const authState = useSupabaseAuth();
   const { theme, toggleTheme } = useTheme();
+  const unreadCount = useUnreadCount();
 
   const isSignedIn =
     authState.status === "ready" && authState.session !== null;
@@ -23,6 +25,15 @@ export function Navbar() {
             <span className="navbar-loading">...</span>
           ) : isSignedIn ? (
             <>
+              <Link href="/chat" className="auth-btn chat-btn">
+                <ChatIcon />
+                Messages
+                {unreadCount > 0 && (
+                  <span className="navbar-unread-badge">
+                    {unreadCount > 99 ? "99+" : unreadCount}
+                  </span>
+                )}
+              </Link>
               <Link href="/my-listings" className="auth-btn my-listings-btn">
                 My Listings
               </Link>
@@ -52,6 +63,23 @@ export function Navbar() {
         </div>
       </div>
     </nav>
+  );
+}
+
+function ChatIcon() {
+  return (
+    <svg
+      width="18"
+      height="18"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    >
+      <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />
+    </svg>
   );
 }
 

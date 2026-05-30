@@ -133,3 +133,89 @@ class ListingDetail(BaseModel):
     updated_at: str
     amenities: list[Amenity]
     images: list[str]
+
+
+# ---------------------------------------------------------------------
+# Chat & Messaging schemas
+# ---------------------------------------------------------------------
+
+
+class MessageCreate(BaseModel):
+    """Create a new message in a chat."""
+
+    content: Annotated[str, Field(min_length=1, max_length=5000)]
+
+
+class MessageResponse(BaseModel):
+    """A single message."""
+
+    id: str
+    chat_id: str
+    sender_id: str
+    content: str
+    created_at: str
+
+
+class ChatParticipant(BaseModel):
+    """A participant in a chat."""
+
+    user_id: str
+    email: str | None
+    full_name: str | None
+
+
+class ChatResponse(BaseModel):
+    """A chat conversation."""
+
+    id: str
+    participants: list[ChatParticipant]
+    last_message: MessageResponse | None
+    unread_count: int
+    updated_at: str
+
+
+class ChatDetailResponse(BaseModel):
+    """Full chat details including messages."""
+
+    id: str
+    participants: list[ChatParticipant]
+    messages: list[MessageResponse]
+
+
+class StartChatRequest(BaseModel):
+    """Request to start a chat with another user."""
+
+    other_user_id: str
+
+
+class StartChatResponse(BaseModel):
+    """Response from starting a chat."""
+
+    chat_id: str
+
+
+class UnreadCountResponse(BaseModel):
+    """Total unread message count."""
+
+    unread_count: int
+
+
+# ---------------------------------------------------------------------
+# Profile schemas
+# ---------------------------------------------------------------------
+
+
+class ProfileResponse(BaseModel):
+    """Public profile information."""
+
+    id: str
+    email: str | None
+    full_name: str | None
+    created_at: str
+
+
+class ProfileWithListingsResponse(BaseModel):
+    """Profile with the user's active listings."""
+
+    profile: ProfileResponse
+    listings: list[ListingDetail]

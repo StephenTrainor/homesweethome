@@ -2,7 +2,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from .config import get_settings
-from .routers import listings
+from .routers import chat, listings, profiles
 
 app = FastAPI(title="Home Sweet Home API")
 
@@ -16,6 +16,8 @@ app.add_middleware(
 )
 
 app.include_router(listings.router)
+app.include_router(chat.router)
+app.include_router(profiles.router)
 
 
 @app.get("/health")

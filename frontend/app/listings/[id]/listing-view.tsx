@@ -10,16 +10,22 @@ import {
   type Amenity,
 } from "@/types/listing";
 import { parseAddressJson } from "@/lib/address";
+import { useSupabaseAuth } from "@/hooks/use-supabase-auth";
 
 interface ListingViewProps {
   listingId: string;
 }
 
 export function ListingView({ listingId }: ListingViewProps) {
+  const authState = useSupabaseAuth();
   const [listing, setListing] = useState<ListingDetail | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [activeImageIndex, setActiveImageIndex] = useState(0);
+
+  const currentUserId =
+    authState.status === "ready" && authState.session?.user?.id;
+  const isOwnListing = listing && currentUserId === listing.owner_id;
 
   useEffect(() => {
     async function fetchListing() {
@@ -227,6 +233,24 @@ export function ListingView({ listingId }: ListingViewProps) {
           <h3 className="section-title">Description</h3>
           <p className="description-text">{listing.description}</p>
         </div>
+
+        {!isOwnListing && (
+          <div className="listing-view-contact">
+            <h3 className="section-title">Interested in this listing?</h3>
+            <div className="listing-contact-actions">
+              <Link
+                href={`/profile/${listing.owner_id}`}
+                className="contact-btn profile-btn"
+              >
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                  <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2" />
+                  <circle cx="12" cy="7" r="4" />
+                </svg>
+                View Owner Profile
+              </Link>
+            </div>
+          </div>
+        )}
       </div>
     </div>
   );
