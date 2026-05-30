@@ -1,6 +1,22 @@
+from functools import lru_cache
+
 from supabase import Client, ClientOptions, create_client
 
 from .config import get_settings
+
+
+@lru_cache(maxsize=1)
+def supabase_anon() -> Client:
+    """Return a Supabase client using the anon key for public read operations."""
+    settings = get_settings()
+    return create_client(
+        settings.supabase_url,
+        settings.supabase_anon_key,
+        options=ClientOptions(
+            auto_refresh_token=False,
+            persist_session=False,
+        ),
+    )
 
 
 def supabase_for_user(access_token: str) -> Client:

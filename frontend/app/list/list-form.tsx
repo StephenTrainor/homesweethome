@@ -14,7 +14,10 @@ import {
   type SubletType,
   type Amenity,
   type ListingCreatePayload,
+  type AddressInput as AddressInputType,
+  type ValidatedAddress,
 } from "@/types/listing";
+import { AddressInput, validatedAddressToJson } from "@/components/address-input";
 
 interface ListFormProps {
   userId: string;
@@ -41,7 +44,14 @@ export function ListForm({ userId }: ListFormProps) {
   const [additionalFees, setAdditionalFees] = useState<number | "">(0);
   const [furnished, setFurnished] = useState(false);
   const [location, setLocation] = useState("");
-  const [address, setAddress] = useState("");
+  const [addressInput, setAddressInput] = useState<AddressInputType>({
+    street: "",
+    street2: "",
+    city: "",
+    state: "",
+    zip5: "",
+  });
+  const [validatedAddress, setValidatedAddress] = useState<ValidatedAddress | null>(null);
   const [startDate, setStartDate] = useState("");
   const [endDate, setEndDate] = useState("");
   const [amenities, setAmenities] = useState<Amenity[]>([]);
@@ -131,7 +141,9 @@ export function ListForm({ userId }: ListFormProps) {
     if (bathrooms === "" || bathrooms < 0) return "Number of bathrooms is required";
     if (monthlyRent === "" || monthlyRent < 0) return "Monthly rent is required";
     if (!location.trim()) return "Location is required";
-    if (!address.trim()) return "Address is required";
+    if (!validatedAddress || !validatedAddress.is_valid) {
+      return "Please validate your address before submitting";
+    }
     if (!startDate) return "Start date is required";
     if (!endDate) return "End date is required";
     if (new Date(startDate) >= new Date(endDate)) {
@@ -214,7 +226,7 @@ export function ListForm({ userId }: ListFormProps) {
         additional_fees: additionalFees === "" ? 0 : additionalFees,
         furnished,
         location: location.trim(),
-        address: address.trim(),
+        address: validatedAddressToJson(validatedAddress!),
         start_date: startDate,
         end_date: endDate,
         amenities,
@@ -385,17 +397,15 @@ export function ListForm({ userId }: ListFormProps) {
         </div>
 
         <div className="form-group">
-          <label htmlFor="address" className="form-label">
+          <label className="form-label">
             Address <span className="required">*</span>
           </label>
-          <input
-            type="text"
-            id="address"
-            value={address}
-            onChange={(e) => setAddress(e.target.value)}
-            className="form-input"
-            placeholder="Full street address"
-            required
+          <AddressInput
+            value={addressInput}
+            onChange={setAddressInput}
+            onValidated={setValidatedAddress}
+            validatedAddress={validatedAddress}
+            disabled={pending}
           />
         </div>
       </section>

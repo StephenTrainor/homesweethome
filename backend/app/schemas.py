@@ -1,3 +1,4 @@
+import json
 from datetime import date
 from typing import Annotated, Literal
 
@@ -25,6 +26,8 @@ Amenity = Literal[
 MAX_IMAGES = 10
 MAX_AMENITIES = 14
 
+REQUIRED_ADDRESS_FIELDS = {"street", "city", "state", "zip5"}
+
 
 class ListingCreate(BaseModel):
     """Payload from the frontend Create Listing form."""
@@ -44,6 +47,35 @@ class ListingCreate(BaseModel):
     end_date: date
     amenities: Annotated[list[Amenity], Field(max_length=MAX_AMENITIES)] = []
     image_paths: Annotated[list[str], Field(min_length=1, max_length=MAX_IMAGES)]
+
+    @field_validator("address")
+    @classmethod
+    def _validate_address_json(cls, v: str) -> str:
+        """Validate that address is a JSON object with required fields."""
+        try:
+            data = json.loads(v)
+        except json.JSONDecodeError as e:
+            raise ValueError(f"Address must be valid JSON: {e}")
+
+        if not isinstance(data, dict):
+            raise ValueError("Address must be a JSON object")
+
+        missing = REQUIRED_ADDRESS_FIELDS - set(data.keys())
+        if missing:
+            raise ValueError(f"Address missing required fields: {sorted(missing)}")
+
+        for field in REQUIRED_ADDRESS_FIELDS:
+            if not isinstance(data[field], str) or not data[field].strip():
+                raise ValueError(f"Address field '{field}' must be a non-empty string")
+
+        if len(data.get("state", "")) != 2:
+            raise ValueError("State must be a 2-letter abbreviation")
+
+        zip5 = data.get("zip5", "")
+        if len(zip5) != 5 or not zip5.isdigit():
+            raise ValueError("zip5 must be a 5-digit string")
+
+        return v
 
     @field_validator("image_paths")
     @classmethod
