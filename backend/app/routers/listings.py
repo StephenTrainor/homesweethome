@@ -26,6 +26,7 @@ from postgrest.exceptions import APIError
 
 from ..deps import AuthContext, get_auth_context, get_idempotency_key
 from ..schemas import ListingCreate, ListingDetail, ListingResponse
+from ..supabase_client import supabase_anon
 
 log = logging.getLogger(__name__)
 
@@ -124,6 +125,72 @@ def get_my_listings(
         )
 
     return result
+
+
+@router.get("/{listing_id}", response_model=ListingDetail)
+def get_listing(listing_id: str) -> ListingDetail:
+    """Return a single listing by ID. Public endpoint - no auth required.
+
+    Only active listings are visible to anonymous users (enforced by RLS).
+    """
+    supabase = supabase_anon()
+
+    resp = (
+        supabase.table("listings")
+        .select("*")
+        .eq("id", listing_id)
+        .limit(1)
+        .execute()
+    )
+    listings = resp.data or []
+
+    if not listings:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Listing not found",
+        )
+
+    listing = listings[0]
+
+    amenities_resp = (
+        supabase.table("listing_amenities")
+        .select("amenity")
+        .eq("listing_id", listing_id)
+        .execute()
+    )
+    amenities = [a["amenity"] for a in (amenities_resp.data or [])]
+
+    images_resp = (
+        supabase.table("listing_images")
+        .select("storage_path")
+        .eq("listing_id", listing_id)
+        .order("position")
+        .execute()
+    )
+    images = [img["storage_path"] for img in (images_resp.data or [])]
+
+    return ListingDetail(
+        id=str(listing["id"]),
+        owner_id=str(listing["owner_id"]),
+        description=listing["description"],
+        sublet_type=listing["sublet_type"],
+        bedrooms=float(listing["bedrooms"]),
+        bathrooms=float(listing["bathrooms"]),
+        sqft=listing.get("sqft"),
+        monthly_rent_cents=listing["monthly_rent_cents"],
+        utilities_included=listing["utilities_included"],
+        additional_fees_cents=listing["additional_fees_cents"],
+        furnished=listing["furnished"],
+        location=listing["location"],
+        address=listing["address"],
+        start_date=listing["start_date"],
+        end_date=listing["end_date"],
+        status=listing["status"],
+        created_at=str(listing["created_at"]),
+        updated_at=str(listing["updated_at"]),
+        amenities=amenities,
+        images=images,
+    )
 
 
 @router.post(

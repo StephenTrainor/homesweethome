@@ -108,72 +108,78 @@ export function MyListingsView() {
   return (
     <div className="listings-grid">
       {listings.map((listing) => (
-        <article key={listing.id} className="listing-card">
-          <div className="listing-card-image">
-            {listing.images.length > 0 && (
-              <img
-                src={getImageUrl(listing.images[0])}
-                alt={`${listing.location} listing`}
-              />
-            )}
-            <span className={`listing-status listing-status-${listing.status}`}>
-              {STATUS_LABELS[listing.status] || listing.status}
-            </span>
-          </div>
-
-          <div className="listing-card-content">
-            <div className="listing-card-header">
-              <h2 className="listing-card-price">
-                {formatCurrency(listing.monthly_rent_cents)}
-                <span className="listing-card-price-period">/mo</span>
-              </h2>
-              <span className="listing-card-type">
-                {SUBLET_TYPE_LABELS[listing.sublet_type]}
-              </span>
-            </div>
-
-            <p className="listing-card-location">{listing.location}</p>
-
-            <div className="listing-card-details">
-              <span>{listing.bedrooms} bed</span>
-              <span className="details-divider">·</span>
-              <span>{listing.bathrooms} bath</span>
-              {listing.sqft && (
-                <>
-                  <span className="details-divider">·</span>
-                  <span>{listing.sqft.toLocaleString()} sqft</span>
-                </>
+        <Link
+          key={listing.id}
+          href={`/listings/${listing.id}`}
+          className="listing-card-link"
+        >
+          <article className="listing-card">
+            <div className="listing-card-image">
+              {listing.images.length > 0 && (
+                <img
+                  src={getImageUrl(listing.images[0])}
+                  alt={`${listing.location} listing`}
+                />
               )}
-            </div>
-
-            <div className="listing-card-dates">
-              <span>
-                {formatDate(listing.start_date)} — {formatDate(listing.end_date)}
+              <span className={`listing-status listing-status-${listing.status}`}>
+                {STATUS_LABELS[listing.status] || listing.status}
               </span>
             </div>
 
-            {listing.amenities.length > 0 && (
-              <div className="listing-card-amenities">
-                {listing.amenities.slice(0, 4).map((amenity) => (
-                  <span key={amenity} className="amenity-tag">
-                    {AMENITY_LABELS[amenity as Amenity] || amenity}
-                  </span>
-                ))}
-                {listing.amenities.length > 4 && (
-                  <span className="amenity-tag amenity-tag-more">
-                    +{listing.amenities.length - 4} more
-                  </span>
+            <div className="listing-card-content">
+              <div className="listing-card-header">
+                <h2 className="listing-card-price">
+                  {formatCurrency(listing.monthly_rent_cents)}
+                  <span className="listing-card-price-period">/mo</span>
+                </h2>
+                <span className="listing-card-type">
+                  {SUBLET_TYPE_LABELS[listing.sublet_type]}
+                </span>
+              </div>
+
+              <p className="listing-card-location">{listing.location}</p>
+
+              <div className="listing-card-details">
+                <span>{listing.bedrooms} bed</span>
+                <span className="details-divider">·</span>
+                <span>{listing.bathrooms} bath</span>
+                {listing.sqft && (
+                  <>
+                    <span className="details-divider">·</span>
+                    <span>{listing.sqft.toLocaleString()} sqft</span>
+                  </>
                 )}
               </div>
-            )}
 
-            <div className="listing-card-meta">
-              <span className="listing-card-created">
-                Created {formatDate(listing.created_at)}
-              </span>
+              <div className="listing-card-dates">
+                <span>
+                  {formatDate(listing.start_date)} — {formatDate(listing.end_date)}
+                </span>
+              </div>
+
+              {listing.amenities.length > 0 && (
+                <div className="listing-card-amenities">
+                  {listing.amenities.slice(0, 4).map((amenity) => (
+                    <span key={amenity} className="amenity-tag">
+                      {AMENITY_LABELS[amenity as Amenity] || amenity}
+                    </span>
+                  ))}
+                  {listing.amenities.length > 4 && (
+                    <span className="amenity-tag amenity-tag-more">
+                      +{listing.amenities.length - 4} more
+                    </span>
+                  )}
+                </div>
+              )}
+
+              <div className="listing-card-meta">
+                <span className="listing-card-created">
+                  Created {formatDate(listing.created_at)}
+                </span>
+              </div>
             </div>
-          </div>
-        </article>
+          </article>
+        </Link>
       ))}
     </div>
   );

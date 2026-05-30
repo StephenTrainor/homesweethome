@@ -77,6 +77,34 @@ export interface ListingCreatePayload {
   image_paths: string[];
 }
 
+export interface AddressInput {
+  street: string;
+  street2: string;
+  city: string;
+  state: string;
+  zip5: string;
+}
+
+export interface ValidatedAddress {
+  street: string;
+  street2: string;
+  city: string;
+  state: string;
+  zip5: string;
+  zip4: string;
+  is_valid: boolean;
+  error: string | null;
+}
+
+export const US_STATES = [
+  "AL", "AK", "AZ", "AR", "CA", "CO", "CT", "DE", "FL", "GA",
+  "HI", "ID", "IL", "IN", "IA", "KS", "KY", "LA", "ME", "MD",
+  "MA", "MI", "MN", "MS", "MO", "MT", "NE", "NV", "NH", "NJ",
+  "NM", "NY", "NC", "ND", "OH", "OK", "OR", "PA", "RI", "SC",
+  "SD", "TN", "TX", "UT", "VT", "VA", "WA", "WV", "WI", "WY",
+  "DC",
+] as const;
+
 export const MAX_IMAGES = 10;
 export const MAX_IMAGE_SIZE_MB = 5;
 export const MAX_IMAGE_SIZE_BYTES = MAX_IMAGE_SIZE_MB * 1024 * 1024;
