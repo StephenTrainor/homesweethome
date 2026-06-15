@@ -1,6 +1,19 @@
 import type { Metadata } from "next";
+import { Fraunces, Outfit } from "next/font/google";
 import { Navbar } from "@/components/navbar";
 import "./globals.css";
+
+const fraunces = Fraunces({
+  subsets: ["latin"],
+  display: "swap",
+  variable: "--font-heading",
+});
+
+const outfit = Outfit({
+  subsets: ["latin"],
+  display: "swap",
+  variable: "--font-body",
+});
 
 export const metadata: Metadata = {
   title: "Home Sweet Home",
@@ -13,15 +26,18 @@ export default function RootLayout({
   children: React.ReactNode;
 }>) {
   return (
-    <html lang="en" suppressHydrationWarning>
+    <html
+      lang="en"
+      className={`${fraunces.variable} ${outfit.variable}`}
+      suppressHydrationWarning
+    >
       <head>
         <script
           dangerouslySetInnerHTML={{
             __html: `
               (function() {
-                const stored = localStorage.getItem('theme');
-                const prefersDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
-                const theme = stored || (prefersDark ? 'dark' : 'light');
+                var stored = localStorage.getItem('theme');
+                var theme = stored || 'light';
                 document.documentElement.setAttribute('data-theme', theme);
               })();
             `,
