@@ -19,13 +19,13 @@ Defense-in-depth against double-submits / duplicate inserts:
 from __future__ import annotations
 
 import logging
-from typing import Any
+from typing import Annotated, Any
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Query, status
 from postgrest.exceptions import APIError
 
 from ..deps import AuthContext, get_auth_context, get_idempotency_key
-from ..schemas import ListingCreate, ListingDetail, ListingResponse
+from ..schemas import ListingCreate, ListingDetail, ListingResponse, PaginatedResponse
 from ..supabase_client import supabase_anon
 
 log = logging.getLogger(__name__)
@@ -64,16 +64,33 @@ def _fetch_listing_by_idem(
     return rows[0] if rows else None
 
 
-@router.get("/mine", response_model=list[ListingDetail])
+DEFAULT_PAGE_SIZE = 20
+MAX_PAGE_SIZE = 100
+
+
+@router.get("/mine", response_model=PaginatedResponse[ListingDetail])
 def get_my_listings(
     ctx: AuthContext = Depends(get_auth_context),
-) -> list[ListingDetail]:
-    """Return all listings owned by the current user."""
+    page: Annotated[int, Query(ge=1)] = 1,
+    page_size: Annotated[int, Query(ge=1, le=MAX_PAGE_SIZE)] = DEFAULT_PAGE_SIZE,
+) -> PaginatedResponse[ListingDetail]:
+    """Return paginated listings owned by the current user."""
+    offset = (page - 1) * page_size
+
+    count_resp = (
+        ctx.supabase.table("listings")
+        .select("id", count="exact")
+        .eq("owner_id", ctx.user_id)
+        .execute()
+    )
+    total_count = count_resp.count or 0
+
     resp = (
         ctx.supabase.table("listings")
         .select("*")
         .eq("owner_id", ctx.user_id)
         .order("created_at", desc=True)
+        .range(offset, offset + page_size - 1)
         .execute()
     )
     listings = resp.data or []
@@ -124,7 +141,9 @@ def get_my_listings(
             )
         )
 
-    return result
+    return PaginatedResponse.build(
+        items=result, page=page, page_size=page_size, total_count=total_count
+    )
 
 
 @router.get("/{listing_id}", response_model=ListingDetail)

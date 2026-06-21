@@ -1,8 +1,33 @@
 import json
+import math
 from datetime import date
-from typing import Annotated, Literal
+from typing import Annotated, Generic, Literal, TypeVar
 
 from pydantic import BaseModel, Field, field_validator, model_validator
+
+T = TypeVar("T")
+
+
+class PaginatedResponse(BaseModel, Generic[T]):
+    """Envelope for paginated list endpoints."""
+
+    items: list[T]
+    page: int
+    page_size: int
+    total_count: int
+    total_pages: int
+
+    @classmethod
+    def build(
+        cls, *, items: list[T], page: int, page_size: int, total_count: int
+    ) -> "PaginatedResponse[T]":
+        return cls(
+            items=items,
+            page=page,
+            page_size=page_size,
+            total_count=total_count,
+            total_pages=max(1, math.ceil(total_count / page_size)),
+        )
 
 SubletType = Literal["one_bedroom", "entire_house"]
 
@@ -175,11 +200,15 @@ class ChatResponse(BaseModel):
 
 
 class ChatDetailResponse(BaseModel):
-    """Full chat details including messages."""
+    """Full chat details including paginated messages."""
 
     id: str
     participants: list[ChatParticipant]
     messages: list[MessageResponse]
+    page: int
+    page_size: int
+    total_messages: int
+    total_pages: int
 
 
 class StartChatRequest(BaseModel):
@@ -215,7 +244,11 @@ class ProfileResponse(BaseModel):
 
 
 class ProfileWithListingsResponse(BaseModel):
-    """Profile with the user's active listings."""
+    """Profile with the user's active listings (paginated)."""
 
     profile: ProfileResponse
     listings: list[ListingDetail]
+    page: int
+    page_size: int
+    total_count: int
+    total_pages: int

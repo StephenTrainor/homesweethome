@@ -1,4 +1,6 @@
-from fastapi import APIRouter, Depends, HTTPException, status
+from typing import Annotated
+
+from fastapi import APIRouter, Depends, HTTPException, Query, status
 
 from ..deps import AuthContext, get_auth_context
 from ..schemas import (
@@ -7,6 +9,7 @@ from ..schemas import (
     ChatResponse,
     MessageCreate,
     MessageResponse,
+    PaginatedResponse,
     StartChatRequest,
     StartChatResponse,
     UnreadCountResponse,
@@ -14,13 +17,21 @@ from ..schemas import (
 
 router = APIRouter(prefix="/chat", tags=["chat"])
 
+DEFAULT_PAGE_SIZE = 20
+MAX_PAGE_SIZE = 100
+DEFAULT_MESSAGE_PAGE_SIZE = 50
+MAX_MESSAGE_PAGE_SIZE = 200
 
-@router.get("/", response_model=list[ChatResponse])
-async def get_chats(ctx: AuthContext = Depends(get_auth_context)) -> list[ChatResponse]:
-    """Get all chats for the current user, ordered by most recent activity."""
+
+@router.get("/", response_model=PaginatedResponse[ChatResponse])
+async def get_chats(
+    ctx: AuthContext = Depends(get_auth_context),
+    page: Annotated[int, Query(ge=1)] = 1,
+    page_size: Annotated[int, Query(ge=1, le=MAX_PAGE_SIZE)] = DEFAULT_PAGE_SIZE,
+) -> PaginatedResponse[ChatResponse]:
+    """Get paginated chats for the current user, ordered by most recent activity."""
     supabase = ctx.supabase
 
-    # Get all chats where user is a participant
     participants_resp = (
         supabase.table("chat_participants")
         .select("chat_id")
@@ -29,24 +40,27 @@ async def get_chats(ctx: AuthContext = Depends(get_auth_context)) -> list[ChatRe
     )
 
     if not participants_resp.data:
-        return []
+        return PaginatedResponse.build(
+            items=[], page=page, page_size=page_size, total_count=0
+        )
 
     chat_ids = [p["chat_id"] for p in participants_resp.data]
+    total_count = len(chat_ids)
 
-    # Get chat details with participants
+    offset = (page - 1) * page_size
     chats_resp = (
         supabase.table("chats")
         .select("id, updated_at")
         .in_("id", chat_ids)
         .order("updated_at", desc=True)
+        .range(offset, offset + page_size - 1)
         .execute()
     )
 
     result = []
-    for chat in chats_resp.data:
+    for chat in chats_resp.data or []:
         chat_id = chat["id"]
 
-        # Get all participants for this chat
         all_participants_resp = (
             supabase.table("chat_participants")
             .select("user_id, last_read_at, profiles(id, email, full_name)")
@@ -68,7 +82,6 @@ async def get_chats(ctx: AuthContext = Depends(get_auth_context)) -> list[ChatRe
                 )
             )
 
-        # Get last message
         last_msg_resp = (
             supabase.table("messages")
             .select("id, chat_id, sender_id, content, created_at")
@@ -89,7 +102,6 @@ async def get_chats(ctx: AuthContext = Depends(get_auth_context)) -> list[ChatRe
                 created_at=msg["created_at"],
             )
 
-        # Count unread messages
         unread_count = 0
         if user_last_read:
             unread_resp = (
@@ -112,7 +124,9 @@ async def get_chats(ctx: AuthContext = Depends(get_auth_context)) -> list[ChatRe
             )
         )
 
-    return result
+    return PaginatedResponse.build(
+        items=result, page=page, page_size=page_size, total_count=total_count
+    )
 
 
 @router.get("/unread-count", response_model=UnreadCountResponse)
@@ -150,12 +164,14 @@ async def get_unread_count(
 
 @router.get("/{chat_id}", response_model=ChatDetailResponse)
 async def get_chat(
-    chat_id: str, ctx: AuthContext = Depends(get_auth_context)
+    chat_id: str,
+    ctx: AuthContext = Depends(get_auth_context),
+    page: Annotated[int, Query(ge=1)] = 1,
+    page_size: Annotated[int, Query(ge=1, le=MAX_MESSAGE_PAGE_SIZE)] = DEFAULT_MESSAGE_PAGE_SIZE,
 ) -> ChatDetailResponse:
-    """Get a specific chat with all messages."""
+    """Get a specific chat with paginated messages."""
     supabase = ctx.supabase
 
-    # Verify user is a participant
     participant_check = (
         supabase.table("chat_participants")
         .select("chat_id")
@@ -170,7 +186,6 @@ async def get_chat(
             detail="Chat not found",
         )
 
-    # Get all participants
     participants_resp = (
         supabase.table("chat_participants")
         .select("user_id, profiles(id, email, full_name)")
@@ -189,12 +204,21 @@ async def get_chat(
             )
         )
 
-    # Get messages
+    count_resp = (
+        supabase.table("messages")
+        .select("id", count="exact")
+        .eq("chat_id", chat_id)
+        .execute()
+    )
+    total_messages = count_resp.count or 0
+
+    offset = (page - 1) * page_size
     messages_resp = (
         supabase.table("messages")
         .select("id, chat_id, sender_id, content, created_at")
         .eq("chat_id", chat_id)
         .order("created_at", desc=False)
+        .range(offset, offset + page_size - 1)
         .execute()
     )
 
@@ -209,7 +233,6 @@ async def get_chat(
         for m in messages_resp.data
     ]
 
-    # Update last_read_at for current user
     supabase.table("chat_participants").update({"last_read_at": "now()"}).eq(
         "chat_id", chat_id
     ).eq("user_id", ctx.user_id).execute()
@@ -218,6 +241,10 @@ async def get_chat(
         id=chat_id,
         participants=participants,
         messages=messages,
+        page=page,
+        page_size=page_size,
+        total_messages=total_messages,
+        total_pages=max(1, -(-total_messages // page_size)),
     )
 
 

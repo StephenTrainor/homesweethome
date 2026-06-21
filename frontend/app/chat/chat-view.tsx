@@ -4,6 +4,10 @@ import { useEffect, useState, useRef, useCallback } from "react";
 import { useSearchParams, useRouter } from "next/navigation";
 import { createBrowserSupabaseClient } from "@/lib/supabase/client";
 import type { Chat, ChatDetail, Message, ChatParticipant } from "@/types/chat";
+import type { PaginatedResponse } from "@/types/listing";
+
+const CHATS_PAGE_SIZE = 20;
+const MESSAGES_PAGE_SIZE = 50;
 
 interface ChatViewProps {
   currentUserId: string;
@@ -21,11 +25,16 @@ export function ChatView({ currentUserId }: ChatViewProps) {
   const [sending, setSending] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
+  const [chatsPage, setChatsPage] = useState(1);
+  const [chatsTotalPages, setChatsTotalPages] = useState(1);
+  const [msgPage, setMsgPage] = useState(1);
+  const [msgTotalPages, setMsgTotalPages] = useState(1);
+
   const scrollToBottom = useCallback(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, []);
 
-  const fetchChats = useCallback(async () => {
+  const fetchChats = useCallback(async (targetPage = 1) => {
     try {
       const supabase = createBrowserSupabaseClient();
       const {
@@ -37,18 +46,28 @@ export function ChatView({ currentUserId }: ChatViewProps) {
         return;
       }
 
-      const response = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/chat/`, {
-        headers: {
-          Authorization: `Bearer ${session.access_token}`,
-        },
+      const params = new URLSearchParams({
+        page: String(targetPage),
+        page_size: String(CHATS_PAGE_SIZE),
       });
+
+      const response = await fetch(
+        `${process.env.NEXT_PUBLIC_API_URL}/chat/?${params}`,
+        {
+          headers: {
+            Authorization: `Bearer ${session.access_token}`,
+          },
+        }
+      );
 
       if (!response.ok) {
         throw new Error("Failed to fetch chats");
       }
 
-      const data: Chat[] = await response.json();
-      setChats(data);
+      const data: PaginatedResponse<Chat> = await response.json();
+      setChats(data.items);
+      setChatsPage(data.page);
+      setChatsTotalPages(data.total_pages);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to load chats");
     } finally {
@@ -57,7 +76,7 @@ export function ChatView({ currentUserId }: ChatViewProps) {
   }, []);
 
   const fetchChatDetail = useCallback(
-    async (chatId: string) => {
+    async (chatId: string, targetPage?: number) => {
       setChatLoading(true);
       try {
         const supabase = createBrowserSupabaseClient();
@@ -70,8 +89,13 @@ export function ChatView({ currentUserId }: ChatViewProps) {
           return;
         }
 
+        const params = new URLSearchParams({
+          page: String(targetPage ?? 1),
+          page_size: String(MESSAGES_PAGE_SIZE),
+        });
+
         const response = await fetch(
-          `${process.env.NEXT_PUBLIC_API_URL}/chat/${chatId}`,
+          `${process.env.NEXT_PUBLIC_API_URL}/chat/${chatId}?${params}`,
           {
             headers: {
               Authorization: `Bearer ${session.access_token}`,
@@ -85,8 +109,9 @@ export function ChatView({ currentUserId }: ChatViewProps) {
 
         const data: ChatDetail = await response.json();
         setActiveChat(data);
+        setMsgPage(data.page);
+        setMsgTotalPages(data.total_pages);
 
-        // Update unread count in chat list
         setChats((prev) =>
           prev.map((c) => (c.id === chatId ? { ...c, unread_count: 0 } : c))
         );
@@ -99,16 +124,14 @@ export function ChatView({ currentUserId }: ChatViewProps) {
     []
   );
 
-  // Initial load and handle URL params for opening specific chat
   useEffect(() => {
-    fetchChats();
+    fetchChats(1);
   }, [fetchChats]);
 
-  // Handle chatId from URL params (when clicking "Message" from profile)
   useEffect(() => {
     const chatId = searchParams.get("chatId");
     if (chatId && !loading) {
-      fetchChatDetail(chatId);
+      fetchChatDetail(chatId, 1);
     }
   }, [searchParams, loading, fetchChatDetail]);
 
@@ -214,8 +237,7 @@ export function ChatView({ currentUserId }: ChatViewProps) {
         )
       );
 
-      // Refresh chat list to update order
-      fetchChats();
+      fetchChats(chatsPage);
     } catch (err) {
       setMessageInput(content);
       setError(err instanceof Error ? err.message : "Failed to send message");
@@ -226,7 +248,7 @@ export function ChatView({ currentUserId }: ChatViewProps) {
 
   const openChat = (chatId: string) => {
     router.push(`/chat?chatId=${chatId}`, { scroll: false });
-    fetchChatDetail(chatId);
+    fetchChatDetail(chatId, 1);
   };
 
   const closeChat = () => {
@@ -336,6 +358,27 @@ export function ChatView({ currentUserId }: ChatViewProps) {
                 </button>
               );
             })}
+            {chatsTotalPages > 1 && (
+              <div className="chat-list-pagination">
+                <button
+                  type="button"
+                  className="chat-page-btn"
+                  disabled={chatsPage <= 1}
+                  onClick={() => fetchChats(chatsPage - 1)}
+                >
+                  Prev
+                </button>
+                <span className="chat-page-info">{chatsPage}/{chatsTotalPages}</span>
+                <button
+                  type="button"
+                  className="chat-page-btn"
+                  disabled={chatsPage >= chatsTotalPages}
+                  onClick={() => fetchChats(chatsPage + 1)}
+                >
+                  Next
+                </button>
+              </div>
+            )}
           </div>
         )}
       </div>
@@ -368,6 +411,27 @@ export function ChatView({ currentUserId }: ChatViewProps) {
             </div>
 
             <div className="chat-messages">
+              {msgTotalPages > 1 && (
+                <div className="chat-messages-pagination">
+                  <button
+                    type="button"
+                    className="chat-page-btn"
+                    disabled={msgPage <= 1 || chatLoading}
+                    onClick={() => fetchChatDetail(activeChat.id, msgPage - 1)}
+                  >
+                    Newer
+                  </button>
+                  <span className="chat-page-info">Page {msgPage} of {msgTotalPages}</span>
+                  <button
+                    type="button"
+                    className="chat-page-btn"
+                    disabled={msgPage >= msgTotalPages || chatLoading}
+                    onClick={() => fetchChatDetail(activeChat.id, msgPage + 1)}
+                  >
+                    Older
+                  </button>
+                </div>
+              )}
               {activeChat.messages.length === 0 ? (
                 <div className="chat-messages-empty">
                   <p>No messages yet. Say hello!</p>

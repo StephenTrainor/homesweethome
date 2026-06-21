@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useState, useCallback } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { createBrowserSupabaseClient } from "@/lib/supabase/client";
@@ -11,6 +11,9 @@ import {
   type Amenity,
 } from "@/types/listing";
 import { useSupabaseAuth } from "@/hooks/use-supabase-auth";
+import { Pagination } from "@/components/pagination";
+
+const PAGE_SIZE = 20;
 
 interface ProfileViewProps {
   userId: string;
@@ -21,39 +24,62 @@ export function ProfileView({ userId }: ProfileViewProps) {
   const authState = useSupabaseAuth();
   const [data, setData] = useState<ProfileWithListings | null>(null);
   const [loading, setLoading] = useState(true);
+  const [listingsLoading, setListingsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [startingChat, setStartingChat] = useState(false);
+  const [page, setPage] = useState(1);
+  const [totalPages, setTotalPages] = useState(1);
 
   const currentUserId =
     authState.status === "ready" && authState.session?.user?.id;
   const isOwnProfile = currentUserId === userId;
 
-  useEffect(() => {
-    async function fetchProfile() {
-      try {
-        const response = await fetch(
-          `${process.env.NEXT_PUBLIC_API_URL}/profiles/${userId}`
-        );
-
-        if (!response.ok) {
-          if (response.status === 404) {
-            throw new Error("Profile not found");
-          }
-          const errorData = await response.json().catch(() => ({}));
-          throw new Error(errorData.detail || "Failed to fetch profile");
-        }
-
-        const profileData = await response.json();
-        setData(profileData);
-      } catch (err) {
-        setError(err instanceof Error ? err.message : "Failed to load profile");
-      } finally {
-        setLoading(false);
-      }
+  const fetchProfile = useCallback(async (targetPage: number) => {
+    const isInitialLoad = targetPage === 1 && !data;
+    if (isInitialLoad) {
+      setLoading(true);
+    } else {
+      setListingsLoading(true);
     }
 
-    fetchProfile();
+    try {
+      const params = new URLSearchParams({
+        page: String(targetPage),
+        page_size: String(PAGE_SIZE),
+      });
+
+      const response = await fetch(
+        `${process.env.NEXT_PUBLIC_API_URL}/profiles/${userId}?${params}`
+      );
+
+      if (!response.ok) {
+        if (response.status === 404) {
+          throw new Error("Profile not found");
+        }
+        const errorData = await response.json().catch(() => ({}));
+        throw new Error(errorData.detail || "Failed to fetch profile");
+      }
+
+      const profileData: ProfileWithListings = await response.json();
+      setData(profileData);
+      setPage(profileData.page);
+      setTotalPages(profileData.total_pages);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to load profile");
+    } finally {
+      setLoading(false);
+      setListingsLoading(false);
+    }
+  }, [userId, data]);
+
+  useEffect(() => {
+    fetchProfile(1);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [userId]);
+
+  function handlePageChange(newPage: number) {
+    fetchProfile(newPage);
+  }
 
   const handleStartChat = async () => {
     if (startingChat) return;
@@ -211,78 +237,87 @@ export function ProfileView({ userId }: ProfileViewProps) {
           {isOwnProfile ? "Your Listings" : `${displayName.split(" ")[0]}'s Listings`}
         </h2>
 
-        {listings.length === 0 ? (
+        {listings.length === 0 && !listingsLoading ? (
           <div className="profile-listings-empty">
             <p>No active listings</p>
           </div>
         ) : (
-          <div className="listings-grid">
-            {listings.map((listing) => (
-              <Link
-                key={listing.id}
-                href={`/listings/${listing.id}`}
-                className="listing-card-link"
-              >
-                <article className="listing-card">
-                  <div className="listing-card-image">
-                    {listing.images.length > 0 && (
-                      <img
-                        src={getImageUrl(listing.images[0])}
-                        alt={`${listing.location} listing`}
-                      />
-                    )}
-                  </div>
-
-                  <div className="listing-card-content">
-                    <div className="listing-card-header">
-                      <h3 className="listing-card-price">
-                        {formatCurrency(listing.monthly_rent_cents)}
-                        <span className="listing-card-price-period">/mo</span>
-                      </h3>
-                      <span className="listing-card-type">
-                        {SUBLET_TYPE_LABELS[listing.sublet_type]}
-                      </span>
-                    </div>
-
-                    <p className="listing-card-location">{listing.location}</p>
-
-                    <div className="listing-card-details">
-                      <span>{listing.bedrooms} bed</span>
-                      <span className="details-divider">·</span>
-                      <span>{listing.bathrooms} bath</span>
-                      {listing.sqft && (
-                        <>
-                          <span className="details-divider">·</span>
-                          <span>{listing.sqft.toLocaleString()} sqft</span>
-                        </>
+          <>
+            <div className="listings-grid" style={{ opacity: listingsLoading ? 0.5 : 1, transition: "opacity 0.2s" }}>
+              {listings.map((listing) => (
+                <Link
+                  key={listing.id}
+                  href={`/listings/${listing.id}`}
+                  className="listing-card-link"
+                >
+                  <article className="listing-card">
+                    <div className="listing-card-image">
+                      {listing.images.length > 0 && (
+                        <img
+                          src={getImageUrl(listing.images[0])}
+                          alt={`${listing.location} listing`}
+                        />
                       )}
                     </div>
 
-                    <div className="listing-card-dates">
-                      <span>
-                        {formatDate(listing.start_date)} — {formatDate(listing.end_date)}
-                      </span>
-                    </div>
+                    <div className="listing-card-content">
+                      <div className="listing-card-header">
+                        <h3 className="listing-card-price">
+                          {formatCurrency(listing.monthly_rent_cents)}
+                          <span className="listing-card-price-period">/mo</span>
+                        </h3>
+                        <span className="listing-card-type">
+                          {SUBLET_TYPE_LABELS[listing.sublet_type]}
+                        </span>
+                      </div>
 
-                    {listing.amenities.length > 0 && (
-                      <div className="listing-card-amenities">
-                        {listing.amenities.slice(0, 3).map((amenity) => (
-                          <span key={amenity} className="amenity-tag">
-                            {AMENITY_LABELS[amenity as Amenity] || amenity}
-                          </span>
-                        ))}
-                        {listing.amenities.length > 3 && (
-                          <span className="amenity-tag amenity-tag-more">
-                            +{listing.amenities.length - 3} more
-                          </span>
+                      <p className="listing-card-location">{listing.location}</p>
+
+                      <div className="listing-card-details">
+                        <span>{listing.bedrooms} bed</span>
+                        <span className="details-divider">·</span>
+                        <span>{listing.bathrooms} bath</span>
+                        {listing.sqft && (
+                          <>
+                            <span className="details-divider">·</span>
+                            <span>{listing.sqft.toLocaleString()} sqft</span>
+                          </>
                         )}
                       </div>
-                    )}
-                  </div>
-                </article>
-              </Link>
-            ))}
-          </div>
+
+                      <div className="listing-card-dates">
+                        <span>
+                          {formatDate(listing.start_date)} — {formatDate(listing.end_date)}
+                        </span>
+                      </div>
+
+                      {listing.amenities.length > 0 && (
+                        <div className="listing-card-amenities">
+                          {listing.amenities.slice(0, 3).map((amenity) => (
+                            <span key={amenity} className="amenity-tag">
+                              {AMENITY_LABELS[amenity as Amenity] || amenity}
+                            </span>
+                          ))}
+                          {listing.amenities.length > 3 && (
+                            <span className="amenity-tag amenity-tag-more">
+                              +{listing.amenities.length - 3} more
+                            </span>
+                          )}
+                        </div>
+                      )}
+                    </div>
+                  </article>
+                </Link>
+              ))}
+            </div>
+
+            <Pagination
+              page={page}
+              totalPages={totalPages}
+              onPageChange={handlePageChange}
+              loading={listingsLoading}
+            />
+          </>
         )}
       </div>
     </div>
