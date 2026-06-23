@@ -1,4 +1,7 @@
-from fastapi import APIRouter, HTTPException, status
+import math
+from typing import Annotated
+
+from fastapi import APIRouter, HTTPException, Query, status
 
 from ..schemas import (
     ListingDetail,
@@ -9,13 +12,19 @@ from ..supabase_client import supabase_anon
 
 router = APIRouter(prefix="/profiles", tags=["profiles"])
 
+DEFAULT_PAGE_SIZE = 20
+MAX_PAGE_SIZE = 100
+
 
 @router.get("/{user_id}", response_model=ProfileWithListingsResponse)
-async def get_profile(user_id: str) -> ProfileWithListingsResponse:
-    """Get a user's public profile with their active listings."""
+async def get_profile(
+    user_id: str,
+    page: Annotated[int, Query(ge=1)] = 1,
+    page_size: Annotated[int, Query(ge=1, le=MAX_PAGE_SIZE)] = DEFAULT_PAGE_SIZE,
+) -> ProfileWithListingsResponse:
+    """Get a user's public profile with their active listings (paginated)."""
     supabase = supabase_anon()
 
-    # Get profile
     profile_resp = (
         supabase.table("profiles")
         .select("id, email, full_name, created_at")
@@ -37,19 +46,29 @@ async def get_profile(user_id: str) -> ProfileWithListingsResponse:
         created_at=profile_data["created_at"],
     )
 
-    # Get user's active listings with images and amenities
+    offset = (page - 1) * page_size
+
+    count_resp = (
+        supabase.table("listings")
+        .select("id", count="exact")
+        .eq("owner_id", user_id)
+        .eq("status", "active")
+        .execute()
+    )
+    total_count = count_resp.count or 0
+
     listings_resp = (
         supabase.table("listings")
         .select("*")
         .eq("owner_id", user_id)
         .eq("status", "active")
         .order("created_at", desc=True)
+        .range(offset, offset + page_size - 1)
         .execute()
     )
 
     listings = []
-    for row in listings_resp.data:
-        # Get images
+    for row in listings_resp.data or []:
         images_resp = (
             supabase.table("listing_images")
             .select("storage_path")
@@ -59,7 +78,6 @@ async def get_profile(user_id: str) -> ProfileWithListingsResponse:
         )
         images = [img["storage_path"] for img in images_resp.data]
 
-        # Get amenities
         amenities_resp = (
             supabase.table("listing_amenities")
             .select("amenity")
@@ -96,4 +114,8 @@ async def get_profile(user_id: str) -> ProfileWithListingsResponse:
     return ProfileWithListingsResponse(
         profile=profile,
         listings=listings,
+        page=page,
+        page_size=page_size,
+        total_count=total_count,
+        total_pages=max(1, math.ceil(total_count / page_size)),
     )

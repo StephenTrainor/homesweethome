@@ -1,3 +1,11 @@
+export interface PaginatedResponse<T> {
+  items: T[];
+  page: number;
+  page_size: number;
+  total_count: number;
+  total_pages: number;
+}
+
 export const SUBLET_TYPES = ["one_bedroom", "entire_house"] as const;
 export type SubletType = (typeof SUBLET_TYPES)[number];
 

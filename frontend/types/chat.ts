@@ -24,6 +24,10 @@ export interface ChatDetail {
   id: string;
   participants: ChatParticipant[];
   messages: Message[];
+  page: number;
+  page_size: number;
+  total_messages: number;
+  total_pages: number;
 }
 
 export interface StartChatResponse {
