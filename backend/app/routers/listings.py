@@ -19,13 +19,14 @@ Defense-in-depth against double-submits / duplicate inserts:
 from __future__ import annotations
 
 import logging
+from datetime import date
 from typing import Annotated, Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from postgrest.exceptions import APIError
 
 from ..deps import AuthContext, get_auth_context, get_idempotency_key
-from ..schemas import ListingCreate, ListingDetail, ListingResponse, PaginatedResponse
+from ..schemas import Amenity, ListingCreate, ListingDetail, ListingResponse, PaginatedResponse, SubletType
 from ..supabase_client import supabase_anon
 
 log = logging.getLogger(__name__)
@@ -68,6 +69,229 @@ DEFAULT_PAGE_SIZE = 20
 MAX_PAGE_SIZE = 100
 
 
+def _build_listing_detail(supabase: Any, listing: dict[str, Any]) -> ListingDetail:
+    """Build a ListingDetail from a listing row, fetching amenities and images."""
+    listing_id = str(listing["id"])
+
+    amenities_resp = (
+        supabase.table("listing_amenities")
+        .select("amenity")
+        .eq("listing_id", listing_id)
+        .execute()
+    )
+    amenities = [a["amenity"] for a in (amenities_resp.data or [])]
+
+    images_resp = (
+        supabase.table("listing_images")
+        .select("storage_path")
+        .eq("listing_id", listing_id)
+        .order("position")
+        .execute()
+    )
+    images = [img["storage_path"] for img in (images_resp.data or [])]
+
+    return ListingDetail(
+        id=listing_id,
+        owner_id=str(listing["owner_id"]),
+        description=listing["description"],
+        sublet_type=listing["sublet_type"],
+        bedrooms=float(listing["bedrooms"]),
+        bathrooms=float(listing["bathrooms"]),
+        sqft=listing.get("sqft"),
+        monthly_rent_cents=listing["monthly_rent_cents"],
+        utilities_included=listing["utilities_included"],
+        additional_fees_cents=listing["additional_fees_cents"],
+        furnished=listing["furnished"],
+        location=listing["location"],
+        address=listing["address"],
+        start_date=listing["start_date"],
+        end_date=listing["end_date"],
+        status=listing["status"],
+        created_at=str(listing["created_at"]),
+        updated_at=str(listing["updated_at"]),
+        amenities=amenities,
+        images=images,
+    )
+
+
+@router.get("/search", response_model=PaginatedResponse[ListingDetail])
+def search_listings(
+    q: Annotated[str | None, Query(description="Keyword search in description and location")] = None,
+    location: Annotated[str | None, Query(description="Filter by city or neighborhood")] = None,
+    zipcode: Annotated[str | None, Query(description="Filter by zipcode", min_length=5, max_length=5)] = None,
+    min_price: Annotated[int | None, Query(description="Minimum monthly rent in dollars", ge=0)] = None,
+    max_price: Annotated[int | None, Query(description="Maximum monthly rent in dollars", ge=0)] = None,
+    min_bedrooms: Annotated[int | None, Query(description="Minimum number of bedrooms", ge=0)] = None,
+    max_bedrooms: Annotated[int | None, Query(description="Maximum number of bedrooms", ge=0)] = None,
+    min_bathrooms: Annotated[int | None, Query(description="Minimum number of bathrooms", ge=0)] = None,
+    max_bathrooms: Annotated[int | None, Query(description="Maximum number of bathrooms", ge=0)] = None,
+    sublet_type: Annotated[SubletType | None, Query(description="Property type filter")] = None,
+    amenities: Annotated[str | None, Query(description="Comma-separated list of required amenities")] = None,
+    start_date: Annotated[date | None, Query(description="Listings available on or after this date")] = None,
+    end_date: Annotated[date | None, Query(description="Listings available on or before this date")] = None,
+    furnished: Annotated[bool | None, Query(description="Filter by furnished status")] = None,
+    page: Annotated[int, Query(ge=1)] = 1,
+    page_size: Annotated[int, Query(ge=1, le=MAX_PAGE_SIZE)] = DEFAULT_PAGE_SIZE,
+) -> PaginatedResponse[ListingDetail]:
+    """Search listings with optional filters. Public endpoint - no auth required.
+
+    All filters are optional and can be combined. Only active listings are returned.
+    The search is designed to work with partial information - you can search by:
+    - Just a keyword
+    - Just a location/city
+    - Just a zipcode
+    - Just filters (price, bedrooms, etc.)
+    - Any combination of the above
+    """
+    supabase = supabase_anon()
+    offset = (page - 1) * page_size
+
+    # Parse amenities if provided
+    required_amenities: list[str] = []
+    if amenities:
+        required_amenities = [a.strip() for a in amenities.split(",") if a.strip()]
+
+    # If amenities are required, we need to find listings that have ALL of them
+    # This requires a subquery approach
+    listing_ids_with_amenities: set[str] | None = None
+    if required_amenities:
+        # For each amenity, get the listing IDs that have it
+        # Then intersect them to get listings that have ALL required amenities
+        for amenity in required_amenities:
+            amenity_resp = (
+                supabase.table("listing_amenities")
+                .select("listing_id")
+                .eq("amenity", amenity)
+                .execute()
+            )
+            amenity_listing_ids = {str(r["listing_id"]) for r in (amenity_resp.data or [])}
+
+            if listing_ids_with_amenities is None:
+                listing_ids_with_amenities = amenity_listing_ids
+            else:
+                listing_ids_with_amenities &= amenity_listing_ids
+
+            # Early exit if no listings match
+            if not listing_ids_with_amenities:
+                return PaginatedResponse.build(
+                    items=[], page=page, page_size=page_size, total_count=0
+                )
+
+    # Build the base query for counting
+    count_query = supabase.table("listings").select("id", count="exact").eq("status", "active")
+
+    # Build the base query for fetching
+    fetch_query = supabase.table("listings").select("*").eq("status", "active")
+
+    # Apply amenities filter if we have listing IDs to filter by
+    if listing_ids_with_amenities is not None:
+        listing_ids_list = list(listing_ids_with_amenities)
+        count_query = count_query.in_("id", listing_ids_list)
+        fetch_query = fetch_query.in_("id", listing_ids_list)
+
+    # Keyword search (in description and location)
+    if q:
+        search_term = q.strip()
+        if search_term:
+            # Use ilike for case-insensitive partial matching
+            # Search in both description and location
+            count_query = count_query.or_(f"description.ilike.%{search_term}%,location.ilike.%{search_term}%")
+            fetch_query = fetch_query.or_(f"description.ilike.%{search_term}%,location.ilike.%{search_term}%")
+
+    # Location filter (city or neighborhood)
+    if location:
+        location_term = location.strip()
+        if location_term:
+            count_query = count_query.ilike("location", f"%{location_term}%")
+            fetch_query = fetch_query.ilike("location", f"%{location_term}%")
+
+    # Zipcode filter - address is stored as JSON, search within it
+    if zipcode:
+        zipcode_term = zipcode.strip()
+        if zipcode_term:
+            # The address field is a JSON string, we search for the zip5 value
+            # Using ilike to search for the zipcode in the JSON string
+            count_query = count_query.ilike("address", f'%"zip5":"{zipcode_term}"%')
+            fetch_query = fetch_query.ilike("address", f'%"zip5":"{zipcode_term}"%')
+
+    # Price filters (convert from dollars to cents)
+    if min_price is not None:
+        min_cents = min_price * 100
+        count_query = count_query.gte("monthly_rent_cents", min_cents)
+        fetch_query = fetch_query.gte("monthly_rent_cents", min_cents)
+
+    if max_price is not None:
+        max_cents = max_price * 100
+        count_query = count_query.lte("monthly_rent_cents", max_cents)
+        fetch_query = fetch_query.lte("monthly_rent_cents", max_cents)
+
+    # Bedroom filters
+    if min_bedrooms is not None:
+        count_query = count_query.gte("bedrooms", min_bedrooms)
+        fetch_query = fetch_query.gte("bedrooms", min_bedrooms)
+
+    if max_bedrooms is not None:
+        count_query = count_query.lte("bedrooms", max_bedrooms)
+        fetch_query = fetch_query.lte("bedrooms", max_bedrooms)
+
+    # Bathroom filters
+    if min_bathrooms is not None:
+        count_query = count_query.gte("bathrooms", min_bathrooms)
+        fetch_query = fetch_query.gte("bathrooms", min_bathrooms)
+
+    if max_bathrooms is not None:
+        count_query = count_query.lte("bathrooms", max_bathrooms)
+        fetch_query = fetch_query.lte("bathrooms", max_bathrooms)
+
+    # Sublet type filter
+    if sublet_type is not None:
+        count_query = count_query.eq("sublet_type", sublet_type)
+        fetch_query = fetch_query.eq("sublet_type", sublet_type)
+
+    # Furnished filter
+    if furnished is not None:
+        count_query = count_query.eq("furnished", furnished)
+        fetch_query = fetch_query.eq("furnished", furnished)
+
+    # Date filters
+    # start_date filter: listing should be available on or after this date
+    # This means the listing's start_date should be <= the requested start_date
+    # and the listing's end_date should be >= the requested start_date
+    if start_date is not None:
+        start_date_str = start_date.isoformat()
+        count_query = count_query.lte("start_date", start_date_str).gte("end_date", start_date_str)
+        fetch_query = fetch_query.lte("start_date", start_date_str).gte("end_date", start_date_str)
+
+    # end_date filter: listing should be available until at least this date
+    # This means the listing's end_date should be >= the requested end_date
+    if end_date is not None:
+        end_date_str = end_date.isoformat()
+        count_query = count_query.gte("end_date", end_date_str)
+        fetch_query = fetch_query.gte("end_date", end_date_str)
+
+    # Execute count query
+    count_resp = count_query.execute()
+    total_count = count_resp.count or 0
+
+    # Execute fetch query with ordering and pagination
+    fetch_resp = (
+        fetch_query
+        .order("created_at", desc=True)
+        .range(offset, offset + page_size - 1)
+        .execute()
+    )
+    listings = fetch_resp.data or []
+
+    # Build detailed listing responses
+    result: list[ListingDetail] = []
+    for listing in listings:
+        result.append(_build_listing_detail(supabase, listing))
+
+    return PaginatedResponse.build(
+        items=result, page=page, page_size=page_size, total_count=total_count
+    )
+
+
 @router.get("/mine", response_model=PaginatedResponse[ListingDetail])
 def get_my_listings(
     ctx: AuthContext = Depends(get_auth_context),
@@ -95,51 +319,9 @@ def get_my_listings(
     )
     listings = resp.data or []
 
-    result: list[ListingDetail] = []
-    for listing in listings:
-        listing_id = str(listing["id"])
-
-        amenities_resp = (
-            ctx.supabase.table("listing_amenities")
-            .select("amenity")
-            .eq("listing_id", listing_id)
-            .execute()
-        )
-        amenities = [a["amenity"] for a in (amenities_resp.data or [])]
-
-        images_resp = (
-            ctx.supabase.table("listing_images")
-            .select("storage_path")
-            .eq("listing_id", listing_id)
-            .order("position")
-            .execute()
-        )
-        images = [img["storage_path"] for img in (images_resp.data or [])]
-
-        result.append(
-            ListingDetail(
-                id=listing_id,
-                owner_id=str(listing["owner_id"]),
-                description=listing["description"],
-                sublet_type=listing["sublet_type"],
-                bedrooms=float(listing["bedrooms"]),
-                bathrooms=float(listing["bathrooms"]),
-                sqft=listing.get("sqft"),
-                monthly_rent_cents=listing["monthly_rent_cents"],
-                utilities_included=listing["utilities_included"],
-                additional_fees_cents=listing["additional_fees_cents"],
-                furnished=listing["furnished"],
-                location=listing["location"],
-                address=listing["address"],
-                start_date=listing["start_date"],
-                end_date=listing["end_date"],
-                status=listing["status"],
-                created_at=str(listing["created_at"]),
-                updated_at=str(listing["updated_at"]),
-                amenities=amenities,
-                images=images,
-            )
-        )
+    result: list[ListingDetail] = [
+        _build_listing_detail(ctx.supabase, listing) for listing in listings
+    ]
 
     return PaginatedResponse.build(
         items=result, page=page, page_size=page_size, total_count=total_count
@@ -169,47 +351,7 @@ def get_listing(listing_id: str) -> ListingDetail:
             detail="Listing not found",
         )
 
-    listing = listings[0]
-
-    amenities_resp = (
-        supabase.table("listing_amenities")
-        .select("amenity")
-        .eq("listing_id", listing_id)
-        .execute()
-    )
-    amenities = [a["amenity"] for a in (amenities_resp.data or [])]
-
-    images_resp = (
-        supabase.table("listing_images")
-        .select("storage_path")
-        .eq("listing_id", listing_id)
-        .order("position")
-        .execute()
-    )
-    images = [img["storage_path"] for img in (images_resp.data or [])]
-
-    return ListingDetail(
-        id=str(listing["id"]),
-        owner_id=str(listing["owner_id"]),
-        description=listing["description"],
-        sublet_type=listing["sublet_type"],
-        bedrooms=float(listing["bedrooms"]),
-        bathrooms=float(listing["bathrooms"]),
-        sqft=listing.get("sqft"),
-        monthly_rent_cents=listing["monthly_rent_cents"],
-        utilities_included=listing["utilities_included"],
-        additional_fees_cents=listing["additional_fees_cents"],
-        furnished=listing["furnished"],
-        location=listing["location"],
-        address=listing["address"],
-        start_date=listing["start_date"],
-        end_date=listing["end_date"],
-        status=listing["status"],
-        created_at=str(listing["created_at"]),
-        updated_at=str(listing["updated_at"]),
-        amenities=amenities,
-        images=images,
-    )
+    return _build_listing_detail(supabase, listings[0])
 
 
 @router.post(
